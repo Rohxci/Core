@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const { Client, GatewayIntentBits, Events } = require("discord.js");
+const pool = require("./database/pool");
 
 if (!process.env.DISCORD_TOKEN) {
   console.error("Missing DISCORD_TOKEN");
@@ -32,8 +33,15 @@ const client = new Client({
   ]
 });
 
-client.once(Events.ClientReady, readyClient => {
-  console.log(`Logged in as ${readyClient.user.tag}`);
+client.once(Events.ClientReady, async readyClient => {
+  try {
+    await pool.query("SELECT NOW()");
+    console.log("Database connected successfully.");
+    console.log(`Logged in as ${readyClient.user.tag}`);
+  } catch (error) {
+    console.error("Database connection failed:", error);
+    process.exit(1);
+  }
 });
 
 client.on(Events.Error, error => {
