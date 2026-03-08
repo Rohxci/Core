@@ -29,13 +29,6 @@ module.exports = {
         )
     )
 
-    .addRoleOption(option =>
-      option
-        .setName("role_ping")
-        .setDescription("Optional role to ping.")
-        .setRequired(false)
-    )
-
     .addStringOption(option =>
       option
         .setName("title")
@@ -71,6 +64,13 @@ module.exports = {
           { name: "Badge", value: "badge" },
           { name: "Inventory Item", value: "inventory" }
         )
+    )
+
+    .addRoleOption(option =>
+      option
+        .setName("role_ping")
+        .setDescription("Optional role to ping.")
+        .setRequired(false)
     )
 
     .addIntegerOption(option =>
