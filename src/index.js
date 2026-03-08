@@ -1,6 +1,8 @@
 require("dotenv").config();
 
-const { Client, GatewayIntentBits, Events } = require("discord.js");
+const fs = require("fs");
+const path = require("path");
+const { Client, Collection, GatewayIntentBits, Events } = require("discord.js");
 const pool = require("./database/pool");
 
 if (!process.env.DISCORD_TOKEN) {
@@ -33,6 +35,26 @@ const client = new Client({
   ]
 });
 
+client.commands = new Collection();
+
+const commandsPath = path.join(__dirname, "commands");
+
+if (fs.existsSync(commandsPath)) {
+  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith(".js"));
+
+  for (const file of commandFiles) {
+    const filePath = path.join(commandsPath, file);
+    const command = require(filePath);
+
+    if (!command.data || !command.execute) {
+      console.warn(`Skipping invalid command file: ${file}`);
+      continue;
+    }
+
+    client.commands.set(command.data.name, command);
+  }
+}
+
 client.once(Events.ClientReady, async readyClient => {
   try {
     await pool.query("SELECT NOW()");
@@ -41,6 +63,32 @@ client.once(Events.ClientReady, async readyClient => {
   } catch (error) {
     console.error("Database connection failed:", error);
     process.exit(1);
+  }
+});
+
+client.on(Events.InteractionCreate, async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+
+  const command = client.commands.get(interaction.commandName);
+
+  if (!command) return;
+
+  try {
+    await command.execute(interaction);
+  } catch (error) {
+    console.error(`Error while executing /${interaction.commandName}:`, error);
+
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({
+        content: "There was an error while executing this command.",
+        ephemeral: true
+      });
+    } else {
+      await interaction.reply({
+        content: "There was an error while executing this command.",
+        ephemeral: true
+      });
+    }
   }
 });
 
