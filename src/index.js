@@ -8,7 +8,8 @@ const {
   GatewayIntentBits,
   Events,
   REST,
-  Routes
+  Routes,
+  PermissionFlagsBits
 } = require("discord.js");
 
 const pool = require("./database/pool");
@@ -96,6 +97,7 @@ async function registerCommands() {
   client.commands.clear();
 
   for (const filePath of commandFiles) {
+    delete require.cache[require.resolve(filePath)];
     const command = require(filePath);
 
     if (!command.data || !command.execute) {
@@ -124,7 +126,7 @@ async function ensureSchema() {
   await pool.query(schemaSql);
 }
 
-async function sendLevelUpMessage(guild, userId, newLevel) {
+async function sendLevelUpMessage(guild, userId, newLevel, coinsReward = 0) {
   const settings = await getGuildSettings(guild.id);
 
   if (!settings.levelup_messages_enabled) return;
@@ -138,8 +140,12 @@ async function sendLevelUpMessage(guild, userId, newLevel) {
 
   if (!targetChannel || !targetChannel.isTextBased()) return;
 
+  const rewardText = coinsReward > 0
+    ? ` and earned **${coinsReward} coins**`
+    : "";
+
   await targetChannel.send({
-    content: `<@${userId}> reached **level ${newLevel}**!`
+    content: `<@${userId}> reached **level ${newLevel}**${rewardText}!`
   }).catch(() => null);
 }
 
@@ -172,7 +178,6 @@ async function processVoiceSessions() {
 
     if (elapsed < intervalMs) continue;
 
-    const validSeconds = Math.floor(elapsed / 1000);
     const intervals = Math.floor(elapsed / intervalMs);
 
     if (intervals <= 0) continue;
@@ -188,7 +193,12 @@ async function processVoiceSessions() {
     );
 
     if (result.leveledUp) {
-      await sendLevelUpMessage(guild, session.userId, result.newLevel);
+      await sendLevelUpMessage(
+        guild,
+        session.userId,
+        result.newLevel,
+        result.coinsReward
+      );
     }
 
     session.lastTick = now - (elapsed % intervalMs);
@@ -246,7 +256,12 @@ client.on(Events.MessageCreate, async message => {
         messageXpCooldowns.set(cooldownKey, Date.now());
 
         if (result.leveledUp) {
-          await sendLevelUpMessage(message.guild, message.author.id, result.newLevel);
+          await sendLevelUpMessage(
+            message.guild,
+            message.author.id,
+            result.newLevel,
+            result.coinsReward
+          );
         }
       }
     }
@@ -468,7 +483,7 @@ client.on(Events.InteractionCreate, async interaction => {
             return;
           }
 
-          if (!interaction.guild.members.me.permissions.has("ManageRoles")) {
+          if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) {
             await interaction.reply({
               content: "I cannot assign roles right now.",
               ephemeral: true
