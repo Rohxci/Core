@@ -15,7 +15,7 @@ const {
 const pool = require("./database/pool");
 const { ensureGuildSettings, getGuildSettings } = require("./services/configService");
 const { ensureUser } = require("./services/profileService");
-const { getBalance, removeCoins } = require("./services/economyService");
+const { getBalance, removeCoins, addCoins } = require("./services/economyService");
 const {
   addRandomMessageXp,
   addVoiceSeconds,
@@ -205,6 +205,181 @@ async function processVoiceSessions() {
   }
 }
 
+async function reserveRewardClaim(guildId, panelId, userId) {
+  const db = await pool.connect();
+
+  try {
+    await db.query("BEGIN");
+
+    const panelResult = await db.query(
+      `SELECT *
+       FROM reward_panels
+       WHERE id = $1 AND guild_id = $2
+       FOR UPDATE`,
+      [panelId, guildId]
+    );
+
+    const panel = panelResult.rows[0];
+
+    if (!panel) {
+      await db.query("ROLLBACK");
+      return { ok: false, reason: "not_found" };
+    }
+
+    if (!panel.is_active) {
+      await db.query("ROLLBACK");
+      return { ok: false, reason: "inactive" };
+    }
+
+    if (panel.stock !== null && Number(panel.claims_count) >= Number(panel.stock)) {
+      await db.query("ROLLBACK");
+      return { ok: false, reason: "sold_out" };
+    }
+
+    if (panel.one_time_claim) {
+      const existingClaim = await db.query(
+        `SELECT 1
+         FROM reward_panel_claims
+         WHERE panel_id = $1 AND user_id = $2
+         LIMIT 1`,
+        [panelId, userId]
+      );
+
+      if (existingClaim.rowCount > 0) {
+        await db.query("ROLLBACK");
+        return { ok: false, reason: "already_claimed" };
+      }
+    }
+
+    const claimResult = await db.query(
+      `INSERT INTO reward_panel_claims (panel_id, guild_id, user_id)
+       VALUES ($1, $2, $3)
+       RETURNING id`,
+      [panelId, guildId, userId]
+    );
+
+    await db.query(
+      `UPDATE reward_panels
+       SET claims_count = claims_count + 1
+       WHERE id = $1`,
+      [panelId]
+    );
+
+    await db.query("COMMIT");
+
+    return {
+      ok: true,
+      panel,
+      claimId: claimResult.rows[0].id
+    };
+  } catch (error) {
+    await db.query("ROLLBACK");
+    throw error;
+  } finally {
+    db.release();
+  }
+}
+
+async function rollbackRewardClaim(panelId, claimId) {
+  const db = await pool.connect();
+
+  try {
+    await db.query("BEGIN");
+
+    await db.query(
+      `DELETE FROM reward_panel_claims
+       WHERE id = $1 AND panel_id = $2`,
+      [claimId, panelId]
+    );
+
+    await db.query(
+      `UPDATE reward_panels
+       SET claims_count = GREATEST(claims_count - 1, 0)
+       WHERE id = $1`,
+      [panelId]
+    );
+
+    await db.query("COMMIT");
+  } catch (error) {
+    await db.query("ROLLBACK");
+    throw error;
+  } finally {
+    db.release();
+  }
+}
+
+async function grantReward(interaction, panel) {
+  if (panel.reward_type === "coins") {
+    await addCoins(
+      interaction.guild.id,
+      interaction.user.id,
+      Number(panel.coins_amount),
+      "reward_panel",
+      null,
+      `Panel ID: ${panel.id}`
+    );
+
+    return `You claimed **${panel.coins_amount} coins**.`;
+  }
+
+  if (panel.reward_type === "badge") {
+    const item = await getShopItemById(interaction.guild.id, Number(panel.item_id));
+
+    if (!item || item.type !== "badge") {
+      throw new Error("This badge reward is not configured correctly.");
+    }
+
+    const alreadyHasBadge = await userHasBadge(
+      interaction.guild.id,
+      interaction.user.id,
+      item.id
+    );
+
+    if (alreadyHasBadge) {
+      throw new Error("You already own this badge.");
+    }
+
+    await addBadgeToUser(interaction.guild.id, interaction.user.id, item.id);
+    return `You claimed the badge **${item.name}**.`;
+  }
+
+  if (panel.reward_type === "inventory") {
+    const item = await getShopItemById(interaction.guild.id, Number(panel.item_id));
+
+    if (!item || item.type !== "inventory") {
+      throw new Error("This inventory reward is not configured correctly.");
+    }
+
+    await addInventoryItem(interaction.guild.id, interaction.user.id, item.id);
+    return `You claimed **${item.name}**.`;
+  }
+
+  if (panel.reward_type === "role") {
+    const role = interaction.guild.roles.cache.get(panel.role_id);
+
+    if (!role) {
+      throw new Error("This role reward is not configured correctly.");
+    }
+
+    if (await userHasRoleItem(interaction.member, role.id)) {
+      throw new Error("You already own this role.");
+    }
+
+    if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+      throw new Error("I cannot assign roles right now.");
+    }
+
+    if (role.position >= interaction.guild.members.me.roles.highest.position) {
+      throw new Error("I cannot assign that role because it is above my highest role.");
+    }
+
+    await interaction.member.roles.add(role);
+    return `You claimed the role ${role}.`;
+  }
+
+  throw new Error("Unknown reward type.");
+}
+
 client.once(Events.ClientReady, async readyClient => {
   try {
     await pool.query("SELECT NOW()");
@@ -386,6 +561,54 @@ client.on(Events.InteractionCreate, async interaction => {
           embeds: [embed],
           components: [row]
         });
+        return;
+      }
+
+      if (parts[0] === "rewardpanel") {
+        const panelId = Number(parts[1]);
+
+        const reserved = await reserveRewardClaim(
+          interaction.guild.id,
+          panelId,
+          interaction.user.id
+        );
+
+        if (!reserved.ok) {
+          let message = "This reward panel cannot be claimed right now.";
+
+          if (reserved.reason === "not_found") {
+            message = "This reward panel no longer exists.";
+          } else if (reserved.reason === "inactive") {
+            message = "This reward panel is no longer active.";
+          } else if (reserved.reason === "sold_out") {
+            message = "This reward panel is sold out.";
+          } else if (reserved.reason === "already_claimed") {
+            message = "You have already claimed this reward.";
+          }
+
+          await interaction.reply({
+            content: message,
+            ephemeral: true
+          });
+          return;
+        }
+
+        try {
+          const rewardMessage = await grantReward(interaction, reserved.panel);
+
+          await interaction.reply({
+            content: rewardMessage,
+            ephemeral: true
+          });
+        } catch (error) {
+          await rollbackRewardClaim(reserved.panel.id, reserved.claimId);
+
+          await interaction.reply({
+            content: error.message || "There was an error while claiming this reward.",
+            ephemeral: true
+          });
+        }
+
         return;
       }
     }
