@@ -1,7 +1,10 @@
 const pool = require("../database/pool");
 const { ensureUser } = require("./profileService");
 const { getGuildSettings } = require("./configService");
+const { addCoins } = require("./economyService");
 const { addXpToProgress, getXpRequiredForLevel } = require("../utils/levelFormula");
+
+const LEVEL_UP_COINS_REWARD = 50;
 
 async function getLevelData(guildId, userId) {
   await ensureUser(guildId, userId);
@@ -66,12 +69,28 @@ async function addXp(guildId, userId, amount) {
     [guildId, userId, updated.level, updated.xp]
   );
 
+  const levelsGained = updated.level - current.level;
+  const coinsReward = levelsGained > 0 ? levelsGained * LEVEL_UP_COINS_REWARD : 0;
+
+  if (coinsReward > 0) {
+    await addCoins(
+      guildId,
+      userId,
+      coinsReward,
+      "level_up_reward",
+      null,
+      `Levels gained: ${levelsGained}`
+    );
+  }
+
   return {
     oldLevel: current.level,
     newLevel: updated.level,
     xp: updated.xp,
     xpNeeded: updated.xpNeeded,
-    leveledUp: updated.leveledUp
+    leveledUp: updated.leveledUp,
+    levelsGained,
+    coinsReward
   };
 }
 
@@ -105,7 +124,9 @@ async function addVoiceXpFromSeconds(guildId, userId, validSeconds) {
       newLevel: null,
       xp: null,
       xpNeeded: null,
-      leveledUp: false
+      leveledUp: false,
+      levelsGained: 0,
+      coinsReward: 0
     };
   }
 
@@ -172,6 +193,7 @@ async function getLevelsLeaderboard(guildId, limit = 10) {
 }
 
 module.exports = {
+  LEVEL_UP_COINS_REWARD,
   getLevelData,
   addMessageCount,
   addVoiceSeconds,
