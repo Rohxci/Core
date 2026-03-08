@@ -19,18 +19,34 @@ if (!process.env.GUILD_ID) {
   process.exit(1);
 }
 
+function getAllCommandFiles(dirPath) {
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...getAllCommandFiles(fullPath));
+    } else if (entry.isFile() && entry.name.endsWith(".js")) {
+      files.push(fullPath);
+    }
+  }
+
+  return files;
+}
+
 const commands = [];
 const commandsPath = path.join(__dirname, "commands");
 
 if (fs.existsSync(commandsPath)) {
-  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith(".js"));
+  const commandFiles = getAllCommandFiles(commandsPath);
 
-  for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
+  for (const filePath of commandFiles) {
     const command = require(filePath);
 
     if (!command.data) {
-      console.warn(`Skipping invalid command file: ${file}`);
+      console.warn(`Skipping invalid command file: ${filePath}`);
       continue;
     }
 
