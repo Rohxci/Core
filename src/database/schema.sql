@@ -159,6 +159,39 @@ CREATE TABLE IF NOT EXISTS admin_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS reward_panels (
+  id BIGSERIAL PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  message_id TEXT,
+  created_by_user_id TEXT NOT NULL,
+
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  button_label TEXT NOT NULL,
+  role_ping_id TEXT,
+
+  reward_type TEXT NOT NULL CHECK (reward_type IN ('coins', 'role', 'badge', 'inventory')),
+  coins_amount BIGINT CHECK (coins_amount IS NULL OR coins_amount >= 0),
+  role_id TEXT,
+  item_id BIGINT REFERENCES shop_items(id) ON DELETE SET NULL,
+
+  one_time_claim BOOLEAN NOT NULL DEFAULT TRUE,
+  stock INTEGER CHECK (stock IS NULL OR stock >= 1),
+  claims_count INTEGER NOT NULL DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS reward_panel_claims (
+  id BIGSERIAL PRIMARY KEY,
+  panel_id BIGINT NOT NULL REFERENCES reward_panels(id) ON DELETE CASCADE,
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_guild_level
 ON users(guild_id, level DESC, xp DESC);
 
@@ -179,3 +212,9 @@ ON reputation_logs(guild_id, receiver_id);
 
 CREATE INDEX IF NOT EXISTS idx_admin_logs_guild_target
 ON admin_logs(guild_id, target_user_id);
+
+CREATE INDEX IF NOT EXISTS idx_reward_panels_guild
+ON reward_panels(guild_id);
+
+CREATE INDEX IF NOT EXISTS idx_reward_panel_claims_panel_user
+ON reward_panel_claims(panel_id, user_id);
