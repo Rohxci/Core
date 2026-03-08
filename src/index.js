@@ -2,7 +2,14 @@ require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
-const { Client, Collection, GatewayIntentBits, Events } = require("discord.js");
+const {
+  Client,
+  Collection,
+  GatewayIntentBits,
+  Events,
+  REST,
+  Routes
+} = require("discord.js");
 const pool = require("./database/pool");
 
 if (!process.env.DISCORD_TOKEN) {
@@ -36,6 +43,7 @@ const client = new Client({
 });
 
 client.commands = new Collection();
+const commandData = [];
 
 const commandsPath = path.join(__dirname, "commands");
 
@@ -52,6 +60,7 @@ if (fs.existsSync(commandsPath)) {
     }
 
     client.commands.set(command.data.name, command);
+    commandData.push(command.data.toJSON());
   }
 }
 
@@ -59,9 +68,21 @@ client.once(Events.ClientReady, async readyClient => {
   try {
     await pool.query("SELECT NOW()");
     console.log("Database connected successfully.");
+
+    const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
+
+    await rest.put(
+      Routes.applicationGuildCommands(
+        process.env.CLIENT_ID,
+        process.env.GUILD_ID
+      ),
+      { body: commandData }
+    );
+
+    console.log("Application commands registered successfully.");
     console.log(`Logged in as ${readyClient.user.tag}`);
   } catch (error) {
-    console.error("Database connection failed:", error);
+    console.error("Startup failed:", error);
     process.exit(1);
   }
 });
@@ -70,7 +91,6 @@ client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
   const command = client.commands.get(interaction.commandName);
-
   if (!command) return;
 
   try {
