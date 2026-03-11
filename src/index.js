@@ -15,7 +15,13 @@ const {
 const pool = require("./database/pool");
 const { ensureGuildSettings, getGuildSettings } = require("./services/configService");
 const { ensureUser } = require("./services/profileService");
-const { getBalance, removeCoins, addCoins } = require("./services/economyService");
+const {
+  getBalance,
+  getSeasonBalance,
+  removeCoins,
+  removeSeasonCoins,
+  addCoins
+} = require("./services/economyService");
 const {
   addRandomMessageXp,
   addVoiceSeconds,
@@ -29,7 +35,15 @@ const {
   userHasBadge,
   userHasRoleItem
 } = require("./services/shopService");
-const { isXpExcludedChannel, getAllowedChannels } = require("./utils/channels");
+const {
+  isXpExcludedChannel,
+  getAllowedChannels
+} = require("./utils/channels");
+const { TIMERS } = require("./utils/constants");
+const {
+  refreshShopPanel,
+  refreshSeasonPassPanel
+} = require("./services/panelService");
 
 const profileCommand = require("./commands/profile/profile");
 const leaderboardCommand = require("./commands/leaderboard/leaderboard");
@@ -126,7 +140,14 @@ async function ensureSchema() {
   await pool.query(schemaSql);
 }
 
-async function sendLevelUpMessage(guild, userId, newLevel, coinsReward = 0) {
+async function sendLevelUpMessage(
+  guild,
+  userId,
+  newLevel,
+  coinsReward = 0,
+  seasonCoinsReward = 0,
+  seasonPassRewards = []
+) {
   const settings = await getGuildSettings(guild.id);
 
   if (!settings.levelup_messages_enabled) return;
@@ -140,12 +161,31 @@ async function sendLevelUpMessage(guild, userId, newLevel, coinsReward = 0) {
 
   if (!targetChannel || !targetChannel.isTextBased()) return;
 
-  const rewardText = coinsReward > 0
-    ? ` and earned **${coinsReward} coins**`
-    : "";
+  const rewards = [];
+
+  if (coinsReward > 0) {
+    rewards.push(`earned **${coinsReward} Coins**`);
+  }
+
+  if (seasonCoinsReward > 0 && settings.season_status === "active") {
+    rewards.push(`earned **${seasonCoinsReward} Season Coins**`);
+  }
+
+  let content = `<@${userId}> reached **level ${newLevel}**`;
+
+  if (rewards.length > 0) {
+    content += ` and ${rewards.join(" and ")}`;
+  }
+
+  content += "!";
+
+  if (seasonPassRewards.length > 0) {
+    const rewardText = seasonPassRewards.map(reward => reward.text).join(", ");
+    content += ` They also won the Season Pass reward: **${rewardText}**!`;
+  }
 
   await targetChannel.send({
-    content: `<@${userId}> reached **level ${newLevel}**${rewardText}!`
+    content
   }).catch(() => null);
 }
 
@@ -197,7 +237,9 @@ async function processVoiceSessions() {
         guild,
         session.userId,
         result.newLevel,
-        result.coinsReward
+        result.coinsReward,
+        result.seasonCoinsReward,
+        result.seasonPassRewards
       );
     }
 
@@ -319,7 +361,7 @@ async function grantReward(interaction, panel) {
       `Panel ID: ${panel.id}`
     );
 
-    return `You claimed **${panel.coins_amount} coins**.`;
+    return `You claimed **${panel.coins_amount} Coins**.`;
   }
 
   if (panel.reward_type === "badge") {
@@ -380,6 +422,12 @@ async function grantReward(interaction, panel) {
   throw new Error("Unknown reward type.");
 }
 
+function scheduleDelete(message, delayMs) {
+  setTimeout(() => {
+    message.delete().catch(() => null);
+  }, delayMs);
+}
+
 client.once(Events.ClientReady, async readyClient => {
   try {
     await pool.query("SELECT NOW()");
@@ -417,9 +465,9 @@ client.on(Events.MessageCreate, async message => {
     const settings = await getGuildSettings(message.guild.id);
 
     if (!settings.levels_enabled) return;
+    if (settings.season_status !== "active") return;
 
     const isExcluded = await isXpExcludedChannel(message.guild.id, message.channel.id);
-
     const cooldownKey = `${message.guild.id}:${message.author.id}`;
     const lastMessageXpAt = messageXpCooldowns.get(cooldownKey) || 0;
 
@@ -435,7 +483,9 @@ client.on(Events.MessageCreate, async message => {
             message.guild,
             message.author.id,
             result.newLevel,
-            result.coinsReward
+            result.coinsReward,
+            result.seasonCoinsReward,
+            result.seasonPassRewards
           );
         }
       }
@@ -502,6 +552,23 @@ client.on(Events.InteractionCreate, async interaction => {
       if (!command) return;
 
       await command.execute(interaction);
+
+      if (
+        interaction.commandName === "profile" ||
+        interaction.commandName === "leaderboard"
+      ) {
+        const reply = await interaction.fetchReply().catch(() => null);
+
+        if (reply) {
+          const delay =
+            interaction.commandName === "profile"
+              ? TIMERS.profileDeleteMs
+              : TIMERS.leaderboardDeleteMs;
+
+          scheduleDelete(reply, delay);
+        }
+      }
+
       return;
     }
 
@@ -617,11 +684,12 @@ client.on(Events.InteractionCreate, async interaction => {
       const menuParts = interaction.customId.split(":");
 
       if (menuParts[0] === "shopmenu") {
-        const viewerUserId = menuParts[1];
+        const shopType = menuParts[1];
+        const settings = await getGuildSettings(interaction.guild.id);
 
-        if (interaction.user.id !== viewerUserId) {
+        if (shopType === "seasonal" && settings.season_status !== "active") {
           await interaction.reply({
-            content: "You cannot use this shop panel.",
+            content: "Season is over.",
             ephemeral: true
           });
           return;
@@ -632,20 +700,12 @@ client.on(Events.InteractionCreate, async interaction => {
 
         if (valueParts[0] !== "shopbuy") return;
 
-        const itemId = Number(valueParts[1]);
-        const valueViewerId = valueParts[2];
-
-        if (interaction.user.id !== valueViewerId) {
-          await interaction.reply({
-            content: "You cannot use this shop panel.",
-            ephemeral: true
-          });
-          return;
-        }
+        const valueShopType = valueParts[1];
+        const itemId = Number(valueParts[2]);
 
         const item = await getShopItemById(interaction.guild.id, itemId);
 
-        if (!item || !item.is_active) {
+        if (!item || !item.is_active || item.shop_type !== valueShopType) {
           await interaction.reply({
             content: "This shop item is no longer available.",
             ephemeral: true
@@ -661,11 +721,17 @@ client.on(Events.InteractionCreate, async interaction => {
           return;
         }
 
-        const balance = await getBalance(interaction.guild.id, interaction.user.id);
+        const balance =
+          valueShopType === "seasonal"
+            ? await getSeasonBalance(interaction.guild.id, interaction.user.id)
+            : await getBalance(interaction.guild.id, interaction.user.id);
 
         if (balance < item.price) {
           await interaction.reply({
-            content: "You do not have enough coins for this item.",
+            content:
+              valueShopType === "seasonal"
+                ? "You do not have enough Season Coins for this item."
+                : "You do not have enough Coins for this item.",
             ephemeral: true
           });
           return;
@@ -723,14 +789,24 @@ client.on(Events.InteractionCreate, async interaction => {
           }
         }
 
-        await removeCoins(
-          interaction.guild.id,
-          interaction.user.id,
-          item.price,
-          "shop_purchase",
-          null,
-          `Item ID: ${item.id}`
-        );
+        if (valueShopType === "seasonal") {
+          await removeSeasonCoins(
+            interaction.guild.id,
+            interaction.user.id,
+            item.price,
+            "season_shop_purchase",
+            `Item ID: ${item.id}`
+          );
+        } else {
+          await removeCoins(
+            interaction.guild.id,
+            interaction.user.id,
+            item.price,
+            "shop_purchase",
+            null,
+            `Item ID: ${item.id}`
+          );
+        }
 
         if (item.type === "inventory") {
           await addInventoryItem(interaction.guild.id, interaction.user.id, item.id);
@@ -743,8 +819,17 @@ client.on(Events.InteractionCreate, async interaction => {
 
         await decreaseStock(interaction.guild.id, item.id);
 
+        await refreshShopPanel(
+          interaction.client,
+          interaction.guild.id,
+          valueShopType
+        );
+
         await interaction.reply({
-          content: `You bought **${item.name}** for ${item.price} coins.`,
+          content:
+            valueShopType === "seasonal"
+              ? `You bought **${item.name}** for **${item.price} Season Coins**.`
+              : `You bought **${item.name}** for **${item.price} Coins**.`,
           ephemeral: true
         });
       }
