@@ -244,6 +244,93 @@ CREATE TABLE IF NOT EXISTS reward_panel_claims (
   claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+/* =========================
+   MIGRATIONS FOR OLD DB
+========================= */
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS current_season INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS season_status TEXT NOT NULL DEFAULT 'active';
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS season_currency_name TEXT NOT NULL DEFAULT 'Season Coins';
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS season_currency_symbol TEXT NOT NULL DEFAULT '❄️';
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS season_daily_amount INTEGER NOT NULL DEFAULT 10;
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS season_work_amount INTEGER NOT NULL DEFAULT 5;
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS season_levelup_amount INTEGER NOT NULL DEFAULT 3;
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS normal_shop_panel_channel_id TEXT;
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS normal_shop_panel_message_id TEXT;
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS seasonal_shop_panel_channel_id TEXT;
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS seasonal_shop_panel_message_id TEXT;
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS season_pass_panel_channel_id TEXT;
+
+ALTER TABLE guild_settings
+ADD COLUMN IF NOT EXISTS season_pass_panel_message_id TEXT;
+
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS season_coins BIGINT NOT NULL DEFAULT 0;
+
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS highest_level_ever INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE users
+ADD COLUMN IF NOT EXISTS first_season_played INTEGER;
+
+ALTER TABLE shop_items
+ADD COLUMN IF NOT EXISTS shop_type TEXT NOT NULL DEFAULT 'normal';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'guild_settings_season_status_check'
+  ) THEN
+    ALTER TABLE guild_settings
+    ADD CONSTRAINT guild_settings_season_status_check
+    CHECK (season_status IN ('active', 'ended'));
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'shop_items_shop_type_check'
+  ) THEN
+    ALTER TABLE shop_items
+    ADD CONSTRAINT shop_items_shop_type_check
+    CHECK (shop_type IN ('normal', 'seasonal'));
+  END IF;
+END
+$$;
+
+/* =========================
+   INDEXES
+========================= */
+
 CREATE INDEX IF NOT EXISTS idx_users_guild_level
 ON users(guild_id, level DESC, xp DESC);
 
