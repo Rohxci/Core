@@ -43,9 +43,14 @@ module.exports = {
     const result = await claimDaily(interaction.guild.id, interaction.user.id);
     await setDailyCooldown(interaction.guild.id, interaction.user.id);
 
+    let content = `${interaction.user} claimed **${result.amount} Coins** from the daily reward.`;
+
+    if (result.seasonAmount > 0) {
+      content += ` They also earned **${result.seasonAmount} Season Coins**.`;
+    }
+
     await interaction.reply({
-      content: `You claimed ${result.amount} coins from your daily reward.\nNew balance: ${result.newBalance}`,
-      ephemeral: true
+      content
     });
   }
 };
