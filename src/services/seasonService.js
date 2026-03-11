@@ -1,6 +1,7 @@
 const pool = require("../database/pool");
 const { getGuildSettings, updateGuildSetting, ensureGuildSettings } = require("./configService");
 const { resetSeasonProgressForAllUsers } = require("./profileService");
+const { addShopItem, updateShopItem, getShopItemById } = require("./shopService");
 
 async function getCurrentSeasonInfo(guildId) {
   const settings = await getGuildSettings(guildId);
@@ -45,12 +46,14 @@ async function startNewSeason(guildId) {
 
 async function getSeasonPassRewards(guildId, seasonNumber) {
   const result = await pool.query(
-    `SELECT *
-     FROM season_pass_rewards
-     WHERE guild_id = $1
-       AND season_number = $2
-       AND is_active = TRUE
-     ORDER BY level_required ASC, id ASC`,
+    `SELECT spr.*, si.name AS item_name, si.description AS item_description
+     FROM season_pass_rewards spr
+     LEFT JOIN shop_items si
+       ON si.id = spr.item_id
+     WHERE spr.guild_id = $1
+       AND spr.season_number = $2
+       AND spr.is_active = TRUE
+     ORDER BY spr.level_required ASC, spr.id ASC`,
     [guildId, seasonNumber]
   );
 
@@ -66,10 +69,12 @@ async function getSeasonPassRewards(guildId, seasonNumber) {
 
 async function getSeasonPassRewardById(guildId, rewardId) {
   const result = await pool.query(
-    `SELECT *
-     FROM season_pass_rewards
-     WHERE guild_id = $1
-       AND id = $2
+    `SELECT spr.*, si.name AS item_name, si.description AS item_description
+     FROM season_pass_rewards spr
+     LEFT JOIN shop_items si
+       ON si.id = spr.item_id
+     WHERE spr.guild_id = $1
+       AND spr.id = $2
      LIMIT 1`,
     [guildId, rewardId]
   );
@@ -89,6 +94,28 @@ async function getSeasonPassRewardById(guildId, rewardId) {
 }
 
 async function addSeasonPassReward(guildId, data) {
+  let itemId = data.itemId || null;
+
+  if ((data.rewardType === "badge" || data.rewardType === "inventory") && !itemId) {
+    if (!data.itemName || !data.itemDescription) {
+      throw new Error("You must provide an item name and description for this reward.");
+    }
+
+    const createdItem = await addShopItem(guildId, {
+      shopType: "seasonal",
+      name: data.itemName,
+      description: data.itemDescription,
+      price: 0,
+      type: data.rewardType,
+      roleId: null,
+      stock: null,
+      isUnlimited: true,
+      isActive: false
+    });
+
+    itemId = createdItem.id;
+  }
+
   const result = await pool.query(
     `INSERT INTO season_pass_rewards (
       guild_id,
@@ -111,20 +138,11 @@ async function addSeasonPassReward(guildId, data) {
       data.coinsAmount || null,
       data.seasonCoinsAmount || null,
       data.roleId || null,
-      data.itemId || null
+      itemId
     ]
   );
 
-  const row = result.rows[0];
-
-  return {
-    ...row,
-    id: Number(row.id),
-    season_number: Number(row.season_number),
-    level_required: Number(row.level_required),
-    coins_amount: row.coins_amount === null ? null : Number(row.coins_amount),
-    season_coins_amount: row.season_coins_amount === null ? null : Number(row.season_coins_amount)
-  };
+  return getSeasonPassRewardById(guildId, result.rows[0].id);
 }
 
 async function updateSeasonPassReward(guildId, rewardId, data) {
@@ -134,13 +152,28 @@ async function updateSeasonPassReward(guildId, rewardId, data) {
     throw new Error("Season pass reward not found.");
   }
 
+  let itemId = data.itemId ?? current.item_id;
+
+  if ((current.reward_type === "badge" || current.reward_type === "inventory") && current.item_id) {
+    if (data.itemName || data.itemDescription) {
+      const linkedItem = await getShopItemById(guildId, current.item_id);
+
+      if (linkedItem) {
+        await updateShopItem(guildId, current.item_id, {
+          name: data.itemName ?? linkedItem.name,
+          description: data.itemDescription ?? linkedItem.description
+        });
+      }
+    }
+  }
+
   const next = {
     levelRequired: data.levelRequired ?? current.level_required,
     rewardType: data.rewardType ?? current.reward_type,
     coinsAmount: data.coinsAmount ?? current.coins_amount,
     seasonCoinsAmount: data.seasonCoinsAmount ?? current.season_coins_amount,
     roleId: data.roleId ?? current.role_id,
-    itemId: data.itemId ?? current.item_id,
+    itemId,
     isActive: data.isActive ?? current.is_active
   };
 
@@ -169,16 +202,7 @@ async function updateSeasonPassReward(guildId, rewardId, data) {
     ]
   );
 
-  const row = result.rows[0];
-
-  return {
-    ...row,
-    id: Number(row.id),
-    season_number: Number(row.season_number),
-    level_required: Number(row.level_required),
-    coins_amount: row.coins_amount === null ? null : Number(row.coins_amount),
-    season_coins_amount: row.season_coins_amount === null ? null : Number(row.season_coins_amount)
-  };
+  return getSeasonPassRewardById(guildId, result.rows[0].id);
 }
 
 async function removeSeasonPassReward(guildId, rewardId) {
