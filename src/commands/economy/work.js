@@ -43,9 +43,14 @@ module.exports = {
     const result = await claimWork(interaction.guild.id, interaction.user.id);
     await setWorkCooldown(interaction.guild.id, interaction.user.id);
 
+    let content = `${interaction.user} worked and earned **${result.amount} Coins**.`;
+
+    if (result.seasonAmount > 0) {
+      content += ` They also earned **${result.seasonAmount} Season Coins**.`;
+    }
+
     await interaction.reply({
-      content: `You worked and earned ${result.amount} coins.\nNew balance: ${result.newBalance}`,
-      ephemeral: true
+      content
     });
   }
 };
