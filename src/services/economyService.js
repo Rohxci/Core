@@ -20,6 +20,20 @@ async function getBalance(guildId, userId) {
   return Number(result.rows[0]?.coins || 0);
 }
 
+async function getSeasonBalance(guildId, userId) {
+  await ensureUser(guildId, userId);
+
+  const result = await pool.query(
+    `SELECT season_coins
+     FROM users
+     WHERE guild_id = $1 AND user_id = $2
+     LIMIT 1`,
+    [guildId, userId]
+  );
+
+  return Number(result.rows[0]?.season_coins || 0);
+}
+
 async function addCoins(guildId, userId, amount, action = "admin_add", targetUserId = null, details = null) {
   await ensureUser(guildId, userId);
 
@@ -85,15 +99,73 @@ async function setCoins(guildId, userId, amount, details = null) {
   return Number(result.rows[0].coins);
 }
 
+async function addSeasonCoins(guildId, userId, amount, action = "season_reward", details = null) {
+  await ensureUser(guildId, userId);
+
+  const result = await pool.query(
+    `UPDATE users
+     SET season_coins = season_coins + $3, updated_at = NOW()
+     WHERE guild_id = $1 AND user_id = $2
+     RETURNING season_coins`,
+    [guildId, userId, amount]
+  );
+
+  await pool.query(
+    `INSERT INTO economy_logs (guild_id, user_id, action, amount, details)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [guildId, userId, action, amount, details]
+  );
+
+  return Number(result.rows[0].season_coins);
+}
+
+async function removeSeasonCoins(guildId, userId, amount, action = "season_spend", details = null) {
+  await ensureUser(guildId, userId);
+
+  const currentBalance = await getSeasonBalance(guildId, userId);
+  const finalAmount = Math.min(currentBalance, amount);
+
+  const result = await pool.query(
+    `UPDATE users
+     SET season_coins = GREATEST(season_coins - $3, 0), updated_at = NOW()
+     WHERE guild_id = $1 AND user_id = $2
+     RETURNING season_coins`,
+    [guildId, userId, finalAmount]
+  );
+
+  await pool.query(
+    `INSERT INTO economy_logs (guild_id, user_id, action, amount, details)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [guildId, userId, action, -finalAmount, details]
+  );
+
+  return Number(result.rows[0].season_coins);
+}
+
 async function claimDaily(guildId, userId) {
   const settings = await getGuildSettings(guildId);
   const amount = randomBetween(settings.daily_min, settings.daily_max);
 
   const newBalance = await addCoins(guildId, userId, amount, "daily");
+  let seasonAmount = 0;
+  let newSeasonBalance = await getSeasonBalance(guildId, userId);
+
+  if (settings.season_status === "active") {
+    seasonAmount = Number(settings.season_daily_amount);
+    newSeasonBalance = await addSeasonCoins(
+      guildId,
+      userId,
+      seasonAmount,
+      "season_daily",
+      null
+    );
+  }
 
   return {
     amount,
-    newBalance
+    newBalance,
+    seasonAmount,
+    newSeasonBalance
   };
 }
 
@@ -102,10 +174,25 @@ async function claimWork(guildId, userId) {
   const amount = randomBetween(settings.work_min, settings.work_max);
 
   const newBalance = await addCoins(guildId, userId, amount, "work");
+  let seasonAmount = 0;
+  let newSeasonBalance = await getSeasonBalance(guildId, userId);
+
+  if (settings.season_status === "active") {
+    seasonAmount = Number(settings.season_work_amount);
+    newSeasonBalance = await addSeasonCoins(
+      guildId,
+      userId,
+      seasonAmount,
+      "season_work",
+      null
+    );
+  }
 
   return {
     amount,
-    newBalance
+    newBalance,
+    seasonAmount,
+    newSeasonBalance
   };
 }
 
@@ -189,9 +276,12 @@ async function getEconomyLeaderboard(guildId, limit = 10) {
 
 module.exports = {
   getBalance,
+  getSeasonBalance,
   addCoins,
   removeCoins,
   setCoins,
+  addSeasonCoins,
+  removeSeasonCoins,
   claimDaily,
   claimWork,
   payUser,
