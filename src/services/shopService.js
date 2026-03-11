@@ -64,7 +64,7 @@ async function addShopItem(guildId, data) {
       is_unlimited,
       is_active
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING *`,
     [
       guildId,
@@ -75,7 +75,8 @@ async function addShopItem(guildId, data) {
       data.type,
       data.roleId || null,
       data.isUnlimited ? null : data.stock,
-      data.isUnlimited
+      data.isUnlimited,
+      data.isActive ?? true
     ]
   );
 
