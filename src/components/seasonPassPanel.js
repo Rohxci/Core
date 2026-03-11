@@ -14,11 +14,11 @@ function formatSeasonPassReward(reward) {
   }
 
   if (reward.reward_type === "badge") {
-    return reward.item_id ? `Badge Item ID: ${reward.item_id}` : "Badge Reward";
+    return reward.item_name ? reward.item_name : "Badge Reward";
   }
 
   if (reward.reward_type === "inventory") {
-    return reward.item_id ? `Inventory Item ID: ${reward.item_id}` : "Inventory Reward";
+    return reward.item_name ? reward.item_name : "Inventory Reward";
   }
 
   return "Unknown Reward";
