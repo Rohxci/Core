@@ -54,4 +54,65 @@ async function buildSeasonPassPanelPayload(guildId) {
   };
 }
 
-async function refreshShopPanel(client, guildId, shopType =
+async function refreshShopPanel(client, guildId, shopType = "normal") {
+  const settings = await getGuildSettings(guildId);
+
+  const channelId =
+    shopType === "seasonal"
+      ? settings.seasonal_shop_panel_channel_id
+      : settings.normal_shop_panel_channel_id;
+
+  const messageId =
+    shopType === "seasonal"
+      ? settings.seasonal_shop_panel_message_id
+      : settings.normal_shop_panel_message_id;
+
+  if (!channelId || !messageId) {
+    return false;
+  }
+
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return false;
+
+  const channel = await guild.channels.fetch(channelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) return false;
+
+  const message = await channel.messages.fetch(messageId).catch(() => null);
+  if (!message) return false;
+
+  const payload = await buildShopPanelPayload(guildId, shopType);
+  await message.edit(payload).catch(() => null);
+
+  return true;
+}
+
+async function refreshSeasonPassPanel(client, guildId) {
+  const settings = await getGuildSettings(guildId);
+
+  if (!settings.season_pass_panel_channel_id || !settings.season_pass_panel_message_id) {
+    return false;
+  }
+
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return false;
+
+  const channel = await guild.channels.fetch(settings.season_pass_panel_channel_id).catch(() => null);
+  if (!channel || !channel.isTextBased()) return false;
+
+  const message = await channel.messages.fetch(settings.season_pass_panel_message_id).catch(() => null);
+  if (!message) return false;
+
+  const payload = await buildSeasonPassPanelPayload(guildId);
+  await message.edit(payload).catch(() => null);
+
+  return true;
+}
+
+module.exports = {
+  saveShopPanelInfo,
+  saveSeasonPassPanelInfo,
+  buildShopPanelPayload,
+  buildSeasonPassPanelPayload,
+  refreshShopPanel,
+  refreshSeasonPassPanel
+};
