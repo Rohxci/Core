@@ -1,16 +1,15 @@
 const pool = require("../database/pool");
-const { ensureUser } = require("./profileService");
+const { ensureUser, updateHighestLevelEver } = require("./profileService");
 const { getGuildSettings } = require("./configService");
-const { addCoins } = require("./economyService");
+const { addCoins, addSeasonCoins } = require("./economyService");
 const { addXpToProgress, getXpRequiredForLevel } = require("../utils/levelFormula");
-
-const LEVEL_UP_COINS_REWARD = 50;
+const { LEVEL_UP_COINS_REWARD } = require("../utils/constants");
 
 async function getLevelData(guildId, userId) {
   await ensureUser(guildId, userId);
 
   const result = await pool.query(
-    `SELECT level, xp, total_messages, total_voice_seconds
+    `SELECT level, xp, total_messages, total_voice_seconds, highest_level_ever, first_season_played
      FROM users
      WHERE guild_id = $1 AND user_id = $2
      LIMIT 1`,
@@ -24,6 +23,8 @@ async function getLevelData(guildId, userId) {
     xp: Number(row?.xp || 0),
     totalMessages: Number(row?.total_messages || 0),
     totalVoiceSeconds: Number(row?.total_voice_seconds || 0),
+    highestLevelEver: Number(row?.highest_level_ever || 1),
+    firstSeasonPlayed: row?.first_season_played === null ? null : Number(row.first_season_played),
     xpNeeded: getXpRequiredForLevel(Number(row?.level || 1))
   };
 }
@@ -54,6 +55,112 @@ async function addVoiceSeconds(guildId, userId, seconds) {
   );
 }
 
+async function applySeasonPassRewards(guildId, userId, oldLevel, newLevel) {
+  const settings = await getGuildSettings(guildId);
+
+  if (settings.season_status !== "active") {
+    return [];
+  }
+
+  const result = await pool.query(
+    `SELECT *
+     FROM season_pass_rewards
+     WHERE guild_id = $1
+       AND season_number = $2
+       AND is_active = TRUE
+       AND level_required > $3
+       AND level_required <= $4
+     ORDER BY level_required ASC, id ASC`,
+    [guildId, Number(settings.current_season), oldLevel, newLevel]
+  );
+
+  const grantedRewards = [];
+
+  for (const reward of result.rows) {
+    const existingClaim = await pool.query(
+      `SELECT 1
+       FROM season_pass_claims
+       WHERE reward_id = $1 AND user_id = $2
+       LIMIT 1`,
+      [reward.id, userId]
+    );
+
+    if (existingClaim.rowCount > 0) continue;
+
+    if (reward.reward_type === "coins") {
+      const amount = Number(reward.coins_amount || 0);
+
+      if (amount > 0) {
+        await addCoins(
+          guildId,
+          userId,
+          amount,
+          "season_pass_reward",
+          null,
+          `Season ${settings.current_season} reward ${reward.id}`
+        );
+      }
+
+      grantedRewards.push({
+        type: "coins",
+        text: `${amount} Coins`
+      });
+    }
+
+    if (reward.reward_type === "season_coins") {
+      const amount = Number(reward.season_coins_amount || 0);
+
+      if (amount > 0) {
+        await addSeasonCoins(
+          guildId,
+          userId,
+          amount,
+          "season_pass_reward",
+          `Season ${settings.current_season} reward ${reward.id}`
+        );
+      }
+
+      grantedRewards.push({
+        type: "season_coins",
+        text: `${amount} Season Coins`
+      });
+    }
+
+    if (reward.reward_type === "role") {
+      grantedRewards.push({
+        type: "role",
+        roleId: reward.role_id,
+        text: `Role Reward`
+      });
+    }
+
+    if (reward.reward_type === "badge") {
+      grantedRewards.push({
+        type: "badge",
+        itemId: reward.item_id,
+        text: `Badge Reward`
+      });
+    }
+
+    if (reward.reward_type === "inventory") {
+      grantedRewards.push({
+        type: "inventory",
+        itemId: reward.item_id,
+        text: `Inventory Reward`
+      });
+    }
+
+    await pool.query(
+      `INSERT INTO season_pass_claims (reward_id, guild_id, user_id, season_number)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (reward_id, user_id) DO NOTHING`,
+      [reward.id, guildId, userId, Number(settings.current_season)]
+    );
+  }
+
+  return grantedRewards;
+}
+
 async function addXp(guildId, userId, amount) {
   await ensureUser(guildId, userId);
 
@@ -69,10 +176,14 @@ async function addXp(guildId, userId, amount) {
     [guildId, userId, updated.level, updated.xp]
   );
 
-  const levelsGained = updated.level - current.level;
-  const coinsReward = levelsGained > 0 ? levelsGained * LEVEL_UP_COINS_REWARD : 0;
+  let levelsGained = updated.level - current.level;
+  let coinsReward = 0;
+  let seasonCoinsReward = 0;
+  let seasonPassRewards = [];
 
-  if (coinsReward > 0) {
+  if (levelsGained > 0) {
+    coinsReward = levelsGained * LEVEL_UP_COINS_REWARD;
+
     await addCoins(
       guildId,
       userId,
@@ -81,6 +192,29 @@ async function addXp(guildId, userId, amount) {
       null,
       `Levels gained: ${levelsGained}`
     );
+
+    const settings = await getGuildSettings(guildId);
+
+    if (settings.season_status === "active") {
+      seasonCoinsReward = levelsGained * Number(settings.season_levelup_amount);
+
+      await addSeasonCoins(
+        guildId,
+        userId,
+        seasonCoinsReward,
+        "season_level_up_reward",
+        `Levels gained: ${levelsGained}`
+      );
+
+      seasonPassRewards = await applySeasonPassRewards(
+        guildId,
+        userId,
+        current.level,
+        updated.level
+      );
+    }
+
+    await updateHighestLevelEver(guildId, userId, updated.level);
   }
 
   return {
@@ -90,7 +224,9 @@ async function addXp(guildId, userId, amount) {
     xpNeeded: updated.xpNeeded,
     leveledUp: updated.leveledUp,
     levelsGained,
-    coinsReward
+    coinsReward,
+    seasonCoinsReward,
+    seasonPassRewards
   };
 }
 
@@ -126,7 +262,9 @@ async function addVoiceXpFromSeconds(guildId, userId, validSeconds) {
       xpNeeded: null,
       leveledUp: false,
       levelsGained: 0,
-      coinsReward: 0
+      coinsReward: 0,
+      seasonCoinsReward: 0,
+      seasonPassRewards: []
     };
   }
 
@@ -152,6 +290,8 @@ async function setLevel(guildId, userId, level) {
      WHERE guild_id = $1 AND user_id = $2`,
     [guildId, userId, safeLevel]
   );
+
+  await updateHighestLevelEver(guildId, userId, safeLevel);
 
   return getLevelData(guildId, userId);
 }
@@ -193,7 +333,6 @@ async function getLevelsLeaderboard(guildId, limit = 10) {
 }
 
 module.exports = {
-  LEVEL_UP_COINS_REWARD,
   getLevelData,
   addMessageCount,
   addVoiceSeconds,
