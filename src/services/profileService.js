@@ -1,11 +1,14 @@
 const pool = require("../database/pool");
+const { getGuildSettings } = require("./configService");
 
 async function ensureUser(guildId, userId) {
+  const settings = await getGuildSettings(guildId);
+
   await pool.query(
-    `INSERT INTO users (guild_id, user_id)
-     VALUES ($1, $2)
+    `INSERT INTO users (guild_id, user_id, first_season_played)
+     VALUES ($1, $2, $3)
      ON CONFLICT (guild_id, user_id) DO NOTHING`,
-    [guildId, userId]
+    [guildId, userId, settings.current_season]
   );
 
   await pool.query(
@@ -127,6 +130,32 @@ async function getUserBadges(guildId, userId) {
   return result.rows;
 }
 
+async function updateHighestLevelEver(guildId, userId, level) {
+  await ensureUser(guildId, userId);
+
+  await pool.query(
+    `UPDATE users
+     SET highest_level_ever = GREATEST(highest_level_ever, $3),
+         updated_at = NOW()
+     WHERE guild_id = $1 AND user_id = $2`,
+    [guildId, userId, level]
+  );
+}
+
+async function resetSeasonProgressForAllUsers(guildId) {
+  await pool.query(
+    `UPDATE users
+     SET level = 1,
+         xp = 0,
+         season_coins = 0,
+         total_messages = 0,
+         total_voice_seconds = 0,
+         updated_at = NOW()
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+}
+
 module.exports = {
   ensureUser,
   getUserProfile,
@@ -135,5 +164,7 @@ module.exports = {
   updateFavorite,
   clearField,
   getUserInventory,
-  getUserBadges
+  getUserBadges,
+  updateHighestLevelEver,
+  resetSeasonProgressForAllUsers
 };
