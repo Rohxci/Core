@@ -22,13 +22,13 @@ function itemTypeChoices(option) {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("setshop")
-    .setDescription("Manage the server shop.")
+    .setDescription("Manage the normal shop.")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
 
     .addSubcommand(subcommand =>
       subcommand
         .setName("add")
-        .setDescription("Add a new shop item.")
+        .setDescription("Add a new normal shop item.")
         .addStringOption(option =>
           option
             .setName("name")
@@ -82,7 +82,7 @@ module.exports = {
     .addSubcommand(subcommand =>
       subcommand
         .setName("edit")
-        .setDescription("Edit an existing shop item.")
+        .setDescription("Edit an existing normal shop item.")
         .addIntegerOption(option =>
           option
             .setName("item_id")
@@ -149,7 +149,7 @@ module.exports = {
     .addSubcommand(subcommand =>
       subcommand
         .setName("remove")
-        .setDescription("Remove a shop item.")
+        .setDescription("Remove a normal shop item.")
         .addIntegerOption(option =>
           option
             .setName("item_id")
@@ -162,7 +162,7 @@ module.exports = {
     .addSubcommand(subcommand =>
       subcommand
         .setName("view")
-        .setDescription("View all active shop items.")
+        .setDescription("View all active normal shop items.")
     ),
 
   async execute(interaction) {
@@ -210,6 +210,7 @@ module.exports = {
       }
 
       const item = await addShopItem(interaction.guild.id, {
+        shopType: "normal",
         name,
         description,
         price,
@@ -220,7 +221,7 @@ module.exports = {
       });
 
       await interaction.reply({
-        content: `Shop item created.\nID: ${item.id}\nName: ${item.name}\nType: ${item.type}`,
+        content: `Normal shop item created.\nID: ${item.id}\nName: ${item.name}\nType: ${item.type}`,
         ephemeral: true
       });
       return;
@@ -230,9 +231,9 @@ module.exports = {
       const itemId = interaction.options.getInteger("item_id", true);
       const current = await getShopItemById(interaction.guild.id, itemId);
 
-      if (!current) {
+      if (!current || current.shop_type !== "normal") {
         await interaction.reply({
-          content: "Shop item not found.",
+          content: "Normal shop item not found.",
           ephemeral: true
         });
         return;
@@ -274,6 +275,7 @@ module.exports = {
       }
 
       const item = await updateShopItem(interaction.guild.id, itemId, {
+        shopType: "normal",
         name,
         description,
         price,
@@ -285,7 +287,7 @@ module.exports = {
       });
 
       await interaction.reply({
-        content: `Shop item updated.\nID: ${item.id}\nName: ${item.name}\nType: ${item.type}`,
+        content: `Normal shop item updated.\nID: ${item.id}\nName: ${item.name}\nType: ${item.type}`,
         ephemeral: true
       });
       return;
@@ -295,9 +297,9 @@ module.exports = {
       const itemId = interaction.options.getInteger("item_id", true);
       const item = await getShopItemById(interaction.guild.id, itemId);
 
-      if (!item) {
+      if (!item || item.shop_type !== "normal") {
         await interaction.reply({
-          content: "Shop item not found.",
+          content: "Normal shop item not found.",
           ephemeral: true
         });
         return;
@@ -306,18 +308,18 @@ module.exports = {
       await removeShopItem(interaction.guild.id, itemId);
 
       await interaction.reply({
-        content: `Removed shop item **${item.name}** (ID: ${item.id}).`,
+        content: `Removed normal shop item **${item.name}** (ID: ${item.id}).`,
         ephemeral: true
       });
       return;
     }
 
     if (subcommand === "view") {
-      const items = await getActiveShopItems(interaction.guild.id);
+      const items = await getActiveShopItems(interaction.guild.id, "normal");
 
       if (!items.length) {
         await interaction.reply({
-          content: "There are no active shop items.",
+          content: "There are no active normal shop items.",
           ephemeral: true
         });
         return;
@@ -330,7 +332,7 @@ module.exports = {
             ? `Stock: ${item.stock}`
             : "Sold Out";
 
-        return `ID: ${item.id} • ${item.name} • ${item.type} • ${item.price} • ${stockText}`;
+        return `ID: ${item.id} • ${item.name} • ${item.type} • ${item.price} Coins • ${stockText}`;
       });
 
       await interaction.reply({
