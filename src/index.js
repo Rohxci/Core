@@ -595,11 +595,11 @@ client.on(Events.InteractionCreate, async interaction => {
         );
 
         const { buildProfileButtons } = require("./components/profileButtons");
-        const row = buildProfileButtons(targetUserId, viewerUserId, section);
+        const rows = buildProfileButtons(targetUserId, viewerUserId, section);
 
         await interaction.update({
           embeds: [embed],
-          components: [row]
+          components: rows
         });
         return;
       }
