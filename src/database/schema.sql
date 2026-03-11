@@ -6,13 +6,22 @@ CREATE TABLE IF NOT EXISTS guild_settings (
   shop_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   levels_enabled BOOLEAN NOT NULL DEFAULT TRUE,
 
+  current_season INTEGER NOT NULL DEFAULT 0,
+  season_status TEXT NOT NULL DEFAULT 'active' CHECK (season_status IN ('active', 'ended')),
+
   currency_name TEXT NOT NULL DEFAULT 'Coins',
   currency_symbol TEXT NOT NULL DEFAULT '🪙',
+  season_currency_name TEXT NOT NULL DEFAULT 'Season Coins',
+  season_currency_symbol TEXT NOT NULL DEFAULT '❄️',
 
   daily_min INTEGER NOT NULL DEFAULT 100,
   daily_max INTEGER NOT NULL DEFAULT 250,
   work_min INTEGER NOT NULL DEFAULT 50,
   work_max INTEGER NOT NULL DEFAULT 150,
+
+  season_daily_amount INTEGER NOT NULL DEFAULT 10,
+  season_work_amount INTEGER NOT NULL DEFAULT 5,
+  season_levelup_amount INTEGER NOT NULL DEFAULT 3,
 
   message_xp_min INTEGER NOT NULL DEFAULT 4,
   message_xp_max INTEGER NOT NULL DEFAULT 7,
@@ -22,6 +31,13 @@ CREATE TABLE IF NOT EXISTS guild_settings (
   voice_xp_interval_minutes INTEGER NOT NULL DEFAULT 5,
 
   levelup_messages_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+
+  normal_shop_panel_channel_id TEXT,
+  normal_shop_panel_message_id TEXT,
+  seasonal_shop_panel_channel_id TEXT,
+  seasonal_shop_panel_message_id TEXT,
+  season_pass_panel_channel_id TEXT,
+  season_pass_panel_message_id TEXT,
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -36,10 +52,14 @@ CREATE TABLE IF NOT EXISTS users (
   favorite TEXT,
 
   coins BIGINT NOT NULL DEFAULT 0,
+  season_coins BIGINT NOT NULL DEFAULT 0,
   reputation BIGINT NOT NULL DEFAULT 0,
 
   level INTEGER NOT NULL DEFAULT 1,
   xp INTEGER NOT NULL DEFAULT 0,
+
+  highest_level_ever INTEGER NOT NULL DEFAULT 1,
+  first_season_played INTEGER,
 
   total_messages BIGINT NOT NULL DEFAULT 0,
   total_voice_seconds BIGINT NOT NULL DEFAULT 0,
@@ -64,6 +84,8 @@ CREATE TABLE IF NOT EXISTS user_cooldowns (
 CREATE TABLE IF NOT EXISTS shop_items (
   id BIGSERIAL PRIMARY KEY,
   guild_id TEXT NOT NULL,
+
+  shop_type TEXT NOT NULL DEFAULT 'normal' CHECK (shop_type IN ('normal', 'seasonal')),
 
   name TEXT NOT NULL,
   description TEXT NOT NULL,
@@ -108,9 +130,39 @@ CREATE TABLE IF NOT EXISTS level_rewards (
   PRIMARY KEY (guild_id, level)
 );
 
+CREATE TABLE IF NOT EXISTS season_pass_rewards (
+  id BIGSERIAL PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  season_number INTEGER NOT NULL,
+
+  level_required INTEGER NOT NULL CHECK (level_required > 0),
+  reward_type TEXT NOT NULL CHECK (reward_type IN ('coins', 'season_coins', 'role', 'badge', 'inventory')),
+
+  coins_amount BIGINT,
+  season_coins_amount BIGINT,
+  role_id TEXT,
+  item_id BIGINT REFERENCES shop_items(id) ON DELETE SET NULL,
+
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS season_pass_claims (
+  id BIGSERIAL PRIMARY KEY,
+  reward_id BIGINT NOT NULL REFERENCES season_pass_rewards(id) ON DELETE CASCADE,
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  season_number INTEGER NOT NULL,
+  claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  UNIQUE (reward_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS channel_settings (
   guild_id TEXT NOT NULL,
-  category TEXT NOT NULL CHECK (category IN ('profile', 'economy', 'shop', 'leaderboard', 'level')),
+  category TEXT NOT NULL CHECK (category IN ('profile', 'economy', 'leaderboard', 'level')),
   channel_id TEXT NOT NULL,
 
   PRIMARY KEY (guild_id, category, channel_id)
@@ -201,8 +253,14 @@ ON users(guild_id, reputation DESC);
 CREATE INDEX IF NOT EXISTS idx_users_guild_coins
 ON users(guild_id, coins DESC);
 
+CREATE INDEX IF NOT EXISTS idx_users_guild_season_coins
+ON users(guild_id, season_coins DESC);
+
 CREATE INDEX IF NOT EXISTS idx_shop_items_guild
 ON shop_items(guild_id);
+
+CREATE INDEX IF NOT EXISTS idx_shop_items_guild_shop_type
+ON shop_items(guild_id, shop_type);
 
 CREATE INDEX IF NOT EXISTS idx_economy_logs_guild_user
 ON economy_logs(guild_id, user_id);
@@ -218,3 +276,9 @@ ON reward_panels(guild_id);
 
 CREATE INDEX IF NOT EXISTS idx_reward_panel_claims_panel_user
 ON reward_panel_claims(panel_id, user_id);
+
+CREATE INDEX IF NOT EXISTS idx_season_pass_rewards_guild_season
+ON season_pass_rewards(guild_id, season_number);
+
+CREATE INDEX IF NOT EXISTS idx_season_pass_claims_guild_user
+ON season_pass_claims(guild_id, user_id);
