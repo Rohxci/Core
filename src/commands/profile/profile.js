@@ -34,6 +34,11 @@ function buildOverviewEmbed(user, member, badges) {
         inline: true
       },
       {
+        name: "Season Coins",
+        value: String(user.season_coins),
+        inline: true
+      },
+      {
         name: "Reputation",
         value: String(user.reputation),
         inline: true
@@ -98,11 +103,18 @@ function buildEconomyEmbed(member, user) {
   return new EmbedBuilder()
     .setTitle(`${member.user.username}'s Economy`)
     .setThumbnail(member.user.displayAvatarURL({ size: 512 }))
-    .addFields({
-      name: "Wallet",
-      value: String(user.coins),
-      inline: true
-    })
+    .addFields(
+      {
+        name: "Coins",
+        value: String(user.coins),
+        inline: true
+      },
+      {
+        name: "Season Coins",
+        value: String(user.season_coins),
+        inline: true
+      }
+    )
     .setTimestamp();
 }
 
@@ -147,6 +159,27 @@ function buildActivityEmbed(member, user) {
     .setTimestamp();
 }
 
+function buildRecordsEmbed(member, user) {
+  return new EmbedBuilder()
+    .setTitle(`${member.user.username}'s Records`)
+    .setThumbnail(member.user.displayAvatarURL({ size: 512 }))
+    .addFields(
+      {
+        name: "Highest Level Ever",
+        value: String(user.highest_level_ever || 1),
+        inline: true
+      },
+      {
+        name: "First Season Played",
+        value: user.first_season_played === null || user.first_season_played === undefined
+          ? "Not set."
+          : `Season ${user.first_season_played}`,
+        inline: true
+      }
+    )
+    .setTimestamp();
+}
+
 async function buildProfileSection(section, guild, targetUserId) {
   const member = await guild.members.fetch(targetUserId);
   const user = await getUserProfile(guild.id, targetUserId);
@@ -162,6 +195,8 @@ async function buildProfileSection(section, guild, targetUserId) {
       return buildEconomyEmbed(member, user);
     case "activity":
       return buildActivityEmbed(member, user);
+    case "records":
+      return buildRecordsEmbed(member, user);
     case "overview":
     default:
       return buildOverviewEmbed(user, member, badges);
