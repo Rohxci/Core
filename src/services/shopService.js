@@ -1,14 +1,23 @@
 const pool = require("../database/pool");
 const { ensureUser } = require("./profileService");
 
-async function getActiveShopItems(guildId) {
+async function getActiveShopItems(guildId, shopType = "normal") {
   const result = await pool.query(
     `SELECT *
      FROM shop_items
      WHERE guild_id = $1
+       AND shop_type = $2
        AND is_active = TRUE
-     ORDER BY price ASC, id ASC`,
-    [guildId]
+     ORDER BY
+       CASE type
+         WHEN 'role' THEN 1
+         WHEN 'badge' THEN 2
+         WHEN 'inventory' THEN 3
+         ELSE 4
+       END ASC,
+       price ASC,
+       id ASC`,
+    [guildId, shopType]
   );
 
   return result.rows.map(row => ({
@@ -45,6 +54,7 @@ async function addShopItem(guildId, data) {
   const result = await pool.query(
     `INSERT INTO shop_items (
       guild_id,
+      shop_type,
       name,
       description,
       price,
@@ -54,10 +64,11 @@ async function addShopItem(guildId, data) {
       is_unlimited,
       is_active
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
     RETURNING *`,
     [
       guildId,
+      data.shopType || "normal",
       data.name,
       data.description,
       data.price,
@@ -86,6 +97,7 @@ async function updateShopItem(guildId, itemId, data) {
   }
 
   const next = {
+    shopType: data.shopType ?? current.shop_type,
     name: data.name ?? current.name,
     description: data.description ?? current.description,
     price: data.price ?? current.price,
@@ -98,20 +110,22 @@ async function updateShopItem(guildId, itemId, data) {
 
   const result = await pool.query(
     `UPDATE shop_items
-     SET name = $3,
-         description = $4,
-         price = $5,
-         type = $6,
-         role_id = $7,
-         stock = $8,
-         is_unlimited = $9,
-         is_active = $10,
+     SET shop_type = $3,
+         name = $4,
+         description = $5,
+         price = $6,
+         type = $7,
+         role_id = $8,
+         stock = $9,
+         is_unlimited = $10,
+         is_active = $11,
          updated_at = NOW()
      WHERE guild_id = $1 AND id = $2
      RETURNING *`,
     [
       guildId,
       itemId,
+      next.shopType,
       next.name,
       next.description,
       next.price,
