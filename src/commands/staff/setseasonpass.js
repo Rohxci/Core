@@ -11,7 +11,6 @@ const {
   updateSeasonPassReward,
   removeSeasonPassReward
 } = require("../../services/seasonService");
-const { getShopItemById } = require("../../services/shopService");
 
 function rewardTypeChoices(option) {
   return option.addChoices(
@@ -68,12 +67,19 @@ module.exports = {
             .setDescription("Role reward if reward type is role.")
             .setRequired(false)
         )
-        .addIntegerOption(option =>
+        .addStringOption(option =>
           option
-            .setName("item_id")
-            .setDescription("Item ID if reward type is badge or inventory.")
+            .setName("item_name")
+            .setDescription("Item name if reward type is badge or inventory.")
             .setRequired(false)
-            .setMinValue(1)
+            .setMaxLength(100)
+        )
+        .addStringOption(option =>
+          option
+            .setName("item_description")
+            .setDescription("Item description if reward type is badge or inventory.")
+            .setRequired(false)
+            .setMaxLength(200)
         )
     )
 
@@ -123,12 +129,19 @@ module.exports = {
             .setDescription("Role reward if reward type is role.")
             .setRequired(false)
         )
-        .addIntegerOption(option =>
+        .addStringOption(option =>
           option
-            .setName("item_id")
-            .setDescription("Item ID if reward type is badge or inventory.")
+            .setName("item_name")
+            .setDescription("New item name for badge or inventory rewards.")
             .setRequired(false)
-            .setMinValue(1)
+            .setMaxLength(100)
+        )
+        .addStringOption(option =>
+          option
+            .setName("item_description")
+            .setDescription("New item description for badge or inventory rewards.")
+            .setRequired(false)
+            .setMaxLength(200)
         )
         .addBooleanOption(option =>
           option
@@ -175,7 +188,8 @@ module.exports = {
       const coinsAmount = interaction.options.getInteger("coins_amount");
       const seasonCoinsAmount = interaction.options.getInteger("season_coins_amount");
       const role = interaction.options.getRole("role");
-      const itemId = interaction.options.getInteger("item_id");
+      const itemName = interaction.options.getString("item_name");
+      const itemDescription = interaction.options.getString("item_description");
 
       if (rewardType === "coins" && !coinsAmount) {
         await interaction.reply({
@@ -201,40 +215,12 @@ module.exports = {
         return;
       }
 
-      if ((rewardType === "badge" || rewardType === "inventory") && !itemId) {
+      if ((rewardType === "badge" || rewardType === "inventory") && (!itemName || !itemDescription)) {
         await interaction.reply({
-          content: "You must provide `item_id` for a badge or inventory reward.",
+          content: "You must provide `item_name` and `item_description` for a badge or inventory reward.",
           ephemeral: true
         });
         return;
-      }
-
-      if (rewardType === "badge" || rewardType === "inventory") {
-        const item = await getShopItemById(interaction.guild.id, itemId);
-
-        if (!item) {
-          await interaction.reply({
-            content: "That item ID does not exist.",
-            ephemeral: true
-          });
-          return;
-        }
-
-        if (rewardType === "badge" && item.type !== "badge") {
-          await interaction.reply({
-            content: "That item ID is not a badge item.",
-            ephemeral: true
-          });
-          return;
-        }
-
-        if (rewardType === "inventory" && item.type !== "inventory") {
-          await interaction.reply({
-            content: "That item ID is not an inventory item.",
-            ephemeral: true
-          });
-          return;
-        }
       }
 
       const reward = await addSeasonPassReward(interaction.guild.id, {
@@ -244,11 +230,12 @@ module.exports = {
         coinsAmount,
         seasonCoinsAmount,
         roleId: role?.id || null,
-        itemId: itemId || null
+        itemName,
+        itemDescription
       });
 
       await interaction.reply({
-        content: `Season pass reward created.\nID: ${reward.id}\nSeason: ${reward.season_number}\nLevel: ${reward.level_required}\nType: ${reward.reward_type}`,
+        content: `Season pass reward created.\nID: ${reward.id}\nSeason: ${reward.season_number}\nLevel: ${reward.level_required}\nReward: ${reward.item_name || reward.reward_type}`,
         ephemeral: true
       });
       return;
@@ -271,14 +258,14 @@ module.exports = {
       const coinsAmount = interaction.options.getInteger("coins_amount");
       const seasonCoinsAmount = interaction.options.getInteger("season_coins_amount");
       const role = interaction.options.getRole("role");
-      const itemId = interaction.options.getInteger("item_id");
+      const itemName = interaction.options.getString("item_name");
+      const itemDescription = interaction.options.getString("item_description");
       const active = interaction.options.getBoolean("active");
 
       const nextType = rewardType ?? current.reward_type;
       const nextCoinsAmount = coinsAmount ?? current.coins_amount;
       const nextSeasonCoinsAmount = seasonCoinsAmount ?? current.season_coins_amount;
       const nextRoleId = role?.id ?? current.role_id;
-      const nextItemId = itemId ?? current.item_id;
 
       if (nextType === "coins" && !nextCoinsAmount) {
         await interaction.reply({
@@ -304,54 +291,19 @@ module.exports = {
         return;
       }
 
-      if ((nextType === "badge" || nextType === "inventory") && !nextItemId) {
-        await interaction.reply({
-          content: "Badge and inventory rewards must have an item ID.",
-          ephemeral: true
-        });
-        return;
-      }
-
-      if (nextType === "badge" || nextType === "inventory") {
-        const item = await getShopItemById(interaction.guild.id, nextItemId);
-
-        if (!item) {
-          await interaction.reply({
-            content: "That item ID does not exist.",
-            ephemeral: true
-          });
-          return;
-        }
-
-        if (nextType === "badge" && item.type !== "badge") {
-          await interaction.reply({
-            content: "That item ID is not a badge item.",
-            ephemeral: true
-          });
-          return;
-        }
-
-        if (nextType === "inventory" && item.type !== "inventory") {
-          await interaction.reply({
-            content: "That item ID is not an inventory item.",
-            ephemeral: true
-          });
-          return;
-        }
-      }
-
       const reward = await updateSeasonPassReward(interaction.guild.id, rewardId, {
         levelRequired,
         rewardType,
         coinsAmount,
         seasonCoinsAmount,
         roleId: role?.id,
-        itemId,
+        itemName,
+        itemDescription,
         isActive: active
       });
 
       await interaction.reply({
-        content: `Season pass reward updated.\nID: ${reward.id}\nSeason: ${reward.season_number}\nLevel: ${reward.level_required}\nType: ${reward.reward_type}`,
+        content: `Season pass reward updated.\nID: ${reward.id}\nSeason: ${reward.season_number}\nLevel: ${reward.level_required}\nReward: ${reward.item_name || reward.reward_type}`,
         ephemeral: true
       });
       return;
@@ -398,10 +350,8 @@ module.exports = {
           rewardText = `${reward.season_coins_amount} Season Coins`;
         } else if (reward.reward_type === "role") {
           rewardText = reward.role_id ? `<@&${reward.role_id}>` : "Role Reward";
-        } else if (reward.reward_type === "badge") {
-          rewardText = reward.item_id ? `Badge Item ID: ${reward.item_id}` : "Badge Reward";
-        } else if (reward.reward_type === "inventory") {
-          rewardText = reward.item_id ? `Inventory Item ID: ${reward.item_id}` : "Inventory Reward";
+        } else if (reward.reward_type === "badge" || reward.reward_type === "inventory") {
+          rewardText = reward.item_name || "Item Reward";
         }
 
         return `ID: ${reward.id} • Level ${reward.level_required} • ${rewardText}`;
