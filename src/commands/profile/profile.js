@@ -237,7 +237,7 @@ module.exports = {
       targetUser.id
     );
 
-    const row = buildProfileButtons(
+    const rows = buildProfileButtons(
       targetUser.id,
       interaction.user.id,
       "overview"
@@ -245,7 +245,7 @@ module.exports = {
 
     await interaction.reply({
       embeds: [embed],
-      components: [row]
+      components: rows
     });
   },
 
