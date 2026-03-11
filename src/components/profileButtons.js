@@ -12,7 +12,8 @@ function buildProfileButtons(targetUserId, viewerUserId, section = "overview") {
     makeButton("inventory", "Inventory"),
     makeButton("reputation", "Reputation"),
     makeButton("economy", "Economy"),
-    makeButton("activity", "Activity")
+    makeButton("activity", "Activity"),
+    makeButton("records", "Records")
   );
 }
 
