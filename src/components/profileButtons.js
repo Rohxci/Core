@@ -1,20 +1,26 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 
-function buildProfileButtons(targetUserId, viewerUserId, section = "overview") {
-  const makeButton = (key, label) =>
-    new ButtonBuilder()
-      .setCustomId(`profile:${key}:${targetUserId}:${viewerUserId}`)
-      .setLabel(label)
-      .setStyle(section === key ? ButtonStyle.Primary : ButtonStyle.Secondary);
+function makeProfileButton(key, label, targetUserId, viewerUserId, section) {
+  return new ButtonBuilder()
+    .setCustomId(`profile:${key}:${targetUserId}:${viewerUserId}`)
+    .setLabel(label)
+    .setStyle(section === key ? ButtonStyle.Primary : ButtonStyle.Secondary);
+}
 
-  return new ActionRowBuilder().addComponents(
-    makeButton("overview", "Overview"),
-    makeButton("inventory", "Inventory"),
-    makeButton("reputation", "Reputation"),
-    makeButton("economy", "Economy"),
-    makeButton("activity", "Activity"),
-    makeButton("records", "Records")
+function buildProfileButtons(targetUserId, viewerUserId, section = "overview") {
+  const firstRow = new ActionRowBuilder().addComponents(
+    makeProfileButton("overview", "Overview", targetUserId, viewerUserId, section),
+    makeProfileButton("inventory", "Inventory", targetUserId, viewerUserId, section),
+    makeProfileButton("reputation", "Reputation", targetUserId, viewerUserId, section),
+    makeProfileButton("economy", "Economy", targetUserId, viewerUserId, section),
+    makeProfileButton("activity", "Activity", targetUserId, viewerUserId, section)
   );
+
+  const secondRow = new ActionRowBuilder().addComponents(
+    makeProfileButton("records", "Records", targetUserId, viewerUserId, section)
+  );
+
+  return [firstRow, secondRow];
 }
 
 module.exports = {
