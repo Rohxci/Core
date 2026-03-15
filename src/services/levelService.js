@@ -2,6 +2,7 @@ const pool = require("../database/pool");
 const { ensureUser, updateHighestLevelEver } = require("./profileService");
 const { getGuildSettings } = require("./configService");
 const { addCoins, addSeasonCoins } = require("./economyService");
+const { addInventoryItem, addBadgeToUser } = require("./shopService");
 const { addXpToProgress, getXpRequiredForLevel } = require("../utils/levelFormula");
 const { LEVEL_UP_COINS_REWARD } = require("../utils/constants");
 
@@ -63,14 +64,16 @@ async function applySeasonPassRewards(guildId, userId, oldLevel, newLevel) {
   }
 
   const result = await pool.query(
-    `SELECT *
-     FROM season_pass_rewards
-     WHERE guild_id = $1
-       AND season_number = $2
-       AND is_active = TRUE
-       AND level_required > $3
-       AND level_required <= $4
-     ORDER BY level_required ASC, id ASC`,
+    `SELECT spr.*, si.name AS item_name
+     FROM season_pass_rewards spr
+     LEFT JOIN shop_items si
+       ON si.id = spr.item_id
+     WHERE spr.guild_id = $1
+       AND spr.season_number = $2
+       AND spr.is_active = TRUE
+       AND spr.level_required > $3
+       AND spr.level_required <= $4
+     ORDER BY spr.level_required ASC, spr.id ASC`,
     [guildId, Number(settings.current_season), oldLevel, newLevel]
   );
 
@@ -126,27 +129,35 @@ async function applySeasonPassRewards(guildId, userId, oldLevel, newLevel) {
       });
     }
 
-    if (reward.reward_type === "role") {
-      grantedRewards.push({
-        type: "role",
-        roleId: reward.role_id,
-        text: `Role Reward`
-      });
-    }
-
     if (reward.reward_type === "badge") {
+      if (reward.item_id) {
+        await addBadgeToUser(guildId, userId, reward.item_id);
+      }
+
       grantedRewards.push({
         type: "badge",
         itemId: reward.item_id,
-        text: `Badge Reward`
+        text: reward.item_name || "Badge Reward"
       });
     }
 
     if (reward.reward_type === "inventory") {
+      if (reward.item_id) {
+        await addInventoryItem(guildId, userId, reward.item_id);
+      }
+
       grantedRewards.push({
         type: "inventory",
         itemId: reward.item_id,
-        text: `Inventory Reward`
+        text: reward.item_name || "Inventory Reward"
+      });
+    }
+
+    if (reward.reward_type === "role") {
+      grantedRewards.push({
+        type: "role",
+        roleId: reward.role_id,
+        text: reward.role_id ? `<@&${reward.role_id}>` : "Role Reward"
       });
     }
 
