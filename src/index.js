@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
+const express = require("express");
 const {
   Client,
   Collection,
@@ -13,6 +14,7 @@ const {
 } = require("discord.js");
 
 const pool = require("./database/pool");
+const leaderboardApi = require("./api/leaderboards");
 const { ensureGuildSettings, getGuildSettings } = require("./services/configService");
 const { ensureUser } = require("./services/profileService");
 const {
@@ -863,6 +865,24 @@ process.on("unhandledRejection", error => {
 
 process.on("uncaughtException", error => {
   console.error("Uncaught exception:", error);
+});
+
+const app = express();
+const apiPort = process.env.PORT || 3000;
+
+app.use((req, res, next) => {
+  req.clientBot = client;
+  next();
+});
+
+app.use("/api", leaderboardApi);
+
+app.get("/", (req, res) => {
+  res.send("Core API is running.");
+});
+
+app.listen(apiPort, () => {
+  console.log(`API server listening on port ${apiPort}`);
 });
 
 client.login(process.env.DISCORD_TOKEN);
