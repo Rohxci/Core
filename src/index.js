@@ -1,5 +1,6 @@
 require("dotenv").config();
 
+const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 const express = require("express");
@@ -869,6 +870,10 @@ process.on("uncaughtException", error => {
 
 const app = express();
 const apiPort = process.env.PORT || 3000;
+
+app.use(cors({
+  origin: "*"
+}));
 
 app.use((req, res, next) => {
   req.clientBot = client;
