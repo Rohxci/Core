@@ -16,6 +16,7 @@ const {
 
 const pool = require("./database/pool");
 const leaderboardApi = require("./api/leaderboards");
+const profileApi = require("./api/profile");
 const { ensureGuildSettings, getGuildSettings } = require("./services/configService");
 const { ensureUser } = require("./services/profileService");
 const {
@@ -881,6 +882,7 @@ app.use((req, res, next) => {
 });
 
 app.use("/api", leaderboardApi);
+app.use("/api", profileApi);
 
 app.get("/", (req, res) => {
   res.send("Core API is running.");
