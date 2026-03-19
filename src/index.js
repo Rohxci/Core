@@ -1,5 +1,6 @@
 require("dotenv").config();
 
+const boostsApi = require("./api/boosts");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
@@ -883,6 +884,7 @@ app.use((req, res, next) => {
 
 app.use("/api", leaderboardApi);
 app.use("/api", profileApi);
+app.use("/api", boostsApi);
 
 app.get("/", (req, res) => {
   res.send("Core API is running.");
